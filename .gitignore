@@ -1,0 +1,12 @@
+# secrets — never commit
+.streamlit/secrets.toml
+.env
+.env.*
+!.env.example
+data/state/
+data/simulated/*.jsonl
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/

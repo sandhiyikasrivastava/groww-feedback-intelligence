@@ -1,0 +1,173 @@
+{
+  "collected_at": "2026-10-21T17:00:32+00:00",
+  "source": "Apple App Store customer reviews RSS feed (public, no auth)",
+  "source_feed_urls": [
+    "https://itunes.apple.com/in/rss/customerreviews/page=1/id=1404871703/sortby=mostrecent/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=2/id=1404871703/sortby=mostrecent/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=3/id=1404871703/sortby=mostrecent/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=4/id=1404871703/sortby=mostrecent/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=5/id=1404871703/sortby=mostrecent/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=6/id=1404871703/sortby=mostrecent/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=7/id=1404871703/sortby=mostrecent/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=8/id=1404871703/sortby=mostrecent/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=9/id=1404871703/sortby=mostrecent/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=10/id=1404871703/sortby=mostrecent/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=1/id=1404871703/sortby=mosthelpful/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=2/id=1404871703/sortby=mosthelpful/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=3/id=1404871703/sortby=mosthelpful/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=4/id=1404871703/sortby=mosthelpful/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=5/id=1404871703/sortby=mosthelpful/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=6/id=1404871703/sortby=mosthelpful/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=7/id=1404871703/sortby=mosthelpful/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=8/id=1404871703/sortby=mosthelpful/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=9/id=1404871703/sortby=mosthelpful/json",
+    "https://itunes.apple.com/in/rss/customerreviews/page=10/id=1404871703/sortby=mosthelpful/json"
+  ],
+  "app": {
+    "name": "Groww Stocks, Mutual Fund, IPO",
+    "app_store_id": "1404871703",
+    "storefront": "India (itunes.apple.com/in)"
+  },
+  "unique_reviews": 988,
+  "date_range": {
+    "earliest": "2018-07-18",
+    "latest": "2026-10-19"
+  },
+  "feed_stats": [
+    {
+      "feed": "mostrecent",
+      "page": 1,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mostrecent",
+      "page": 2,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mostrecent",
+      "page": 3,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mostrecent",
+      "page": 4,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mostrecent",
+      "page": 5,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mostrecent",
+      "page": 6,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mostrecent",
+      "page": 7,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mostrecent",
+      "page": 8,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mostrecent",
+      "page": 9,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mostrecent",
+      "page": 10,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mostrecent",
+      "status": "feed_total",
+      "unique_added": 500
+    },
+    {
+      "feed": "mosthelpful",
+      "page": 1,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mosthelpful",
+      "page": 2,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mosthelpful",
+      "page": 3,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mosthelpful",
+      "page": 4,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mosthelpful",
+      "page": 5,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mosthelpful",
+      "page": 6,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mosthelpful",
+      "page": 7,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mosthelpful",
+      "page": 8,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mosthelpful",
+      "page": 9,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mosthelpful",
+      "page": 10,
+      "status": "ok",
+      "entries": 50
+    },
+    {
+      "feed": "mosthelpful",
+      "status": "feed_total",
+      "unique_added": 488
+    }
+  ],
+  "notes": [
+    "Reviews are verbatim public App Store submissions; no text was modified.",
+    "product_area is derived by the documented heuristic in groww_intel/ingestion.py.",
+    "source_url points to the app's public review page on the India storefront; the review_id in the feed is unique and preserved for traceability."
+  ]
+}
