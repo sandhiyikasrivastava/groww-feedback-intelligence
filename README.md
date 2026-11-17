@@ -18,7 +18,7 @@ outputs.
 
 | | |
 |---|---|
-| **Public URL (temporary tunnel to a local run)** | https://cart-enterprises-evans-conversion.trycloudflare.com |
+| **Public URL (temporary tunnel to a local run)** | https://lake-winter-javascript-football.trycloudflare.com |
 | **Source repository** | https://github.com/sandhiyikasrivastava/groww-feedback-intelligence |
 | **One-click deploy to Streamlit Community Cloud** | [Deploy](https://share.streamlit.io/deploy?url=https://github.com/sandhiyikasrivastava/groww-feedback-intelligence) |
 
@@ -200,6 +200,21 @@ OpenAI share one code path.
 * **No key**: `LLMClient.available` is `False` and the pipeline uses the
   deterministic composer. The UI shows *“Offline deterministic mode”* in the
   sidebar and the reports carry a `mode` field (`llm` / `heuristic`).
+
+### Two theme-analysis modes (sidebar toggle)
+
+* **Fast mode (default, ~10 s):** themes come from the documented keyword
+  taxonomy, while the **LLM writes the recommendations and the customer
+  explanation**. This is the practical mode on free/rate-limited LLM tiers.
+* **Full LLM theme discovery (optional, ~2–4 min):** the LLM proposes themes
+  from the reviews in batches, the candidates are consolidated to at most five,
+  and every cited review id is checked against the dataset. Groq free-tier
+  rate limits can cause individual batches to be skipped; the UI reports which
+  batches failed. If fewer than three themes survive, the app falls back to the
+  taxonomy rather than publishing an incomplete view.
+
+The LLM is never trusted with measured facts (counts, ratings, dates) or with
+quote attribution — those are assembled in code.
 
 ### What the LLM is allowed to do
 
