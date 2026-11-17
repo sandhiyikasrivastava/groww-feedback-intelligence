@@ -179,6 +179,15 @@ def render_sidebar() -> dict:
     )
 
     st.sidebar.subheader("3 · Configuration")
+    use_llm_themes = st.sidebar.checkbox(
+        "LLM theme discovery (slower, ~2–4 min on free tiers)",
+        value=False,
+        help=(
+            "Off (default): themes come from the documented keyword taxonomy, while the "
+            "LLM still writes the recommendations and the customer explanation. "
+            "On: the LLM discovers the themes from all reviews in batches."
+        ),
+    )
     if llm.available:
         st.sidebar.success(f"LLM active: {llm.describe()}")
     else:
@@ -209,6 +218,7 @@ def render_sidebar() -> dict:
         "uploaded_path": uploaded_path,
         "weeks": weeks,
         "as_of": as_of,
+        "use_llm_themes": use_llm_themes,
     }
 
 
@@ -898,6 +908,7 @@ def main() -> None:
                     weeks=options["weeks"],
                     as_of=options["as_of"],
                     client=LLMClient(),
+                    use_llm_themes=options["use_llm_themes"],
                 )
             except IngestionError as exc:
                 st.error(f"The CSV could not be read: {exc}")

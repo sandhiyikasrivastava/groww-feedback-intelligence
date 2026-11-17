@@ -94,53 +94,83 @@ class LLMClient:
             "Content-Type": "application/json",
         }
 
+        # Candidate models: the configured one first, then the fallbacks.  A
+        # model that the account cannot access (HTTP 404) is skipped.
+        candidates = [self.config.model] + [
+            m for m in self.config.fallback_models if m and m != self.config.model
+        ]
+
         last_error: Optional[Exception] = None
-        for attempt in range(1, retries + 1):
-            try:
-                with httpx.Client(timeout=self.config.timeout_seconds) as client:
-                    response = client.post(url, headers=headers, json=payload)
-                if response.status_code in (401, 403):
-                    raise LLMAuthError(
-                        f"{self.config.provider} rejected the API key (HTTP {response.status_code}). "
-                        "Check the key in your environment / Streamlit secrets."
+        attempts = 0
+        for model in candidates:
+            payload["model"] = model
+            for attempt in range(1, retries + 1):
+                attempts += 1
+                try:
+                    with httpx.Client(timeout=self.config.timeout_seconds) as client:
+                        response = client.post(url, headers=headers, json=payload)
+                    if response.status_code in (401, 403):
+                        raise LLMAuthError(
+                            f"{self.config.provider} rejected the API key (HTTP {response.status_code}). "
+                            "Check the key in your environment / Streamlit secrets."
+                        )
+                    if response.status_code == 429:
+                        # Rate limited: wait briefly and retry rather than failing the run.
+                        retry_after = 2.0
+                        header = response.headers.get("retry-after")
+                        if header and header.isdigit():
+                            retry_after = float(header)
+                        last_error = LLMRateLimitError(
+                            f"{self.config.provider} rate limit reached (HTTP 429); "
+                            f"retrying in {retry_after:.0f}s."
+                        )
+                        if attempt < retries:
+                            time.sleep(retry_after * attempt)
+                            continue
+                        raise LLMRateLimitError(
+                            f"{self.config.provider} rate limit reached (HTTP 429) after {retries} attempts."
+                        )
+                    if response.status_code == 404:
+                        # model not available for this key — try the next model
+                        body_text = response.text[:200]
+                        last_error = LLMError(
+                            f"{self.config.provider} does not offer model '{model}' "
+                            f"for this account (HTTP 404): {body_text}"
+                        )
+                        break
+                    if response.status_code >= 500:
+                        raise LLMError(f"{self.config.provider} server error (HTTP {response.status_code}).")
+                    if response.status_code >= 400:
+                        raise LLMError(
+                            f"{self.config.provider} rejected the request (HTTP {response.status_code}): "
+                            f"{response.text[:300]}"
+                        )
+                    body = response.json()
+                    choices = body.get("choices") or []
+                    if not choices:
+                        raise LLMError("LLM response contained no choices.")
+                    message = choices[0].get("message", {})
+                    content = message.get("content")
+                    if content is None:
+                        raise LLMError("LLM response contained no message content.")
+                    return LLMResponse(
+                        text=content.strip(),
+                        raw=body,
+                        model=body.get("model", model),
+                        provider=self.config.provider,
+                        attempts=attempts,
                     )
-                if response.status_code == 429:
-                    raise LLMRateLimitError(
-                        f"{self.config.provider} rate limit reached (HTTP 429). Retry later or lower the batch size."
-                    )
-                if response.status_code >= 500:
-                    raise LLMError(f"{self.config.provider} server error (HTTP {response.status_code}).")
-                if response.status_code >= 400:
-                    raise LLMError(
-                        f"{self.config.provider} rejected the request (HTTP {response.status_code}): "
-                        f"{response.text[:300]}"
-                    )
-                body = response.json()
-                choices = body.get("choices") or []
-                if not choices:
-                    raise LLMError("LLM response contained no choices.")
-                message = choices[0].get("message", {})
-                content = message.get("content")
-                if content is None:
-                    raise LLMError("LLM response contained no message content.")
-                return LLMResponse(
-                    text=content.strip(),
-                    raw=body,
-                    model=body.get("model", self.config.model),
-                    provider=self.config.provider,
-                    attempts=attempt,
-                )
-            except (LLMAuthError, LLMRateLimitError):
-                raise
-            except LLMError as exc:
-                last_error = exc
-            except Exception as exc:  # network / timeout
-                last_error = LLMError(f"Network error while calling {self.config.provider}: {exc}")
+                except (LLMAuthError, LLMRateLimitError):
+                    raise
+                except LLMError as exc:
+                    last_error = exc
+                except Exception as exc:  # network / timeout
+                    last_error = LLMError(f"Network error while calling {self.config.provider}: {exc}")
 
-            if attempt < retries:
-                time.sleep(1.5 * attempt)
+                if attempt < retries:
+                    time.sleep(1.5 * attempt)
 
-        raise LLMError(f"LLM call failed after {retries} attempts: {last_error}")
+        raise LLMError(f"LLM call failed after {attempts} attempts: {last_error}")
 
     def complete_json(
         self,

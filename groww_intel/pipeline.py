@@ -61,8 +61,15 @@ def run_pipeline(
     as_of: Optional[date] = None,
     client: Optional[LLMClient] = None,
     skip_sources: bool = False,
+    use_llm_themes: bool = True,
 ) -> PipelineResult:
-    """Run the whole analysis pipeline over one CSV file."""
+    """Run the whole analysis pipeline over one CSV file.
+
+    ``use_llm_themes=False`` keeps the LLM for the *reports* (recommendations
+    and the customer explanation) but discovers themes with the documented
+    keyword taxonomy.  This is much faster on rate-limited free LLM tiers and
+    is the default in the Streamlit UI.
+    """
     settings = get_settings()
     weeks = weeks or settings.default_weeks
     as_of = as_of or date.today()
@@ -75,9 +82,15 @@ def run_pipeline(
     result.reviews = ingestion.reviews
     result.validation = ingestion.report
 
+    if use_llm_themes:
+        theme_client = client
+    else:
+        from .config import LLMConfig
+
+        theme_client = LLMClient(config=LLMConfig(provider="none"))
     result.analysis = analyze_themes(
         result.reviews,
-        client,
+        theme_client,
         window_start=window_start,
         window_end=as_of,
     )

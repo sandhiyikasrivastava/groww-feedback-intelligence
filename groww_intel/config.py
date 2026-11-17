@@ -53,7 +53,27 @@ def _streamlit_secrets() -> Mapping[str, Any]:
     return {}
 
 
+def _local_secrets() -> Mapping[str, Any]:
+    """Read ``.streamlit/secrets.toml`` from disk (local development / CLI).
+
+    The file is git-ignored.  This lets the CLI scripts and the pytest suite
+    use the same credentials as the Streamlit app without exporting them into
+    the shell environment.
+    """
+    path = PROJECT_ROOT / ".streamlit" / "secrets.toml"
+    if not path.exists():
+        return {}
+    try:
+        import tomllib
+
+        with path.open("rb") as handle:
+            return tomllib.load(handle)
+    except Exception:
+        return {}
+
+
 def _secret(name: str) -> Optional[str]:
+    """Resolve a secret: Streamlit secrets → environment → local secrets file."""
     secrets = _streamlit_secrets()
     value: Any = None
     try:
@@ -62,6 +82,11 @@ def _secret(name: str) -> Optional[str]:
         value = None
     if not value:
         value = os.getenv(name)
+    if not value:
+        try:
+            value = _local_secrets().get(name)
+        except Exception:
+            value = None
     if not value:
         return None
     value = str(value).strip()
@@ -78,7 +103,8 @@ class LLMConfig:
     base_url: str = ""
     temperature: float = 0.0
     max_tokens: int = 1400
-    timeout_seconds: float = 60.0
+    timeout_seconds: float = 90.0
+    fallback_models: tuple = ()
 
     @property
     def available(self) -> bool:
@@ -108,8 +134,13 @@ def load_llm_config() -> LLMConfig:
         return LLMConfig(
             provider="groq",
             api_key=groq_key,
-            model=_secret("GROQ_MODEL") or "llama-3.3-70b-versatile",
+            model=_secret("GROQ_MODEL") or "openai/gpt-oss-120b",
             base_url=_secret("GROQ_BASE_URL") or "https://api.groq.com/openai/v1",
+            fallback_models=tuple(
+                _secret("GROQ_FALLBACK_MODELS").split(",")
+                if _secret("GROQ_FALLBACK_MODELS")
+                else ("qwen/qwen3.8-27b", "openai/gpt-oss-20b")
+            ),
         )
     if provider == "openai":
         return LLMConfig(

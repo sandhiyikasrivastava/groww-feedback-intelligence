@@ -37,9 +37,9 @@ from .sources import grounding_violations, verified_source_text
 
 PULSE_SYSTEM = (
     "You are a senior product manager at Groww, an Indian investing platform. "
-    "You write a factual internal weekly product pulse for the product team. "
-    "You never invent reviews, numbers, policies or trends. You answer with a "
-    "single JSON object and nothing else."
+    "You propose actionable product recommendations from customer-review evidence. "
+    "You never invent reviews, numbers, policies or trends, and you never claim that "
+    "a trend increased or decreased. You answer with a single JSON object and nothing else."
 )
 
 PULSE_USER = """Analysis window: {start} to {end}. Reviews analysed: {n}.
@@ -47,24 +47,43 @@ PULSE_USER = """Analysis window: {start} to {end}. Reviews analysed: {n}.
 Leading themes (counts are measured from the dataset):
 {themes}
 
-Verbatim customer quotations (use these exactly, never re-word them):
+Verbatim customer quotations (these are the only quotations that exist):
 {quotes}
 
 Most important observed issue:
 {issue}
 
-Requirements:
-- body_markdown: the weekly pulse, maximum {max_words} words.
-- Include the three leading themes, the quotations, the key issue and exactly three recommendations.
-- State facts that the counts and quotations support. Do NOT claim a trend increased or decreased.
-- Do not present an interpretation as an established fact.
-- recommendations: exactly {recs} objects, each with title, problem (the problem being addressed),
-  intervention (the proposed change) and measurable_outcome (how the team will measure success).
-- Use the quotations verbatim.
+Propose exactly {recs} recommendations for the product team. For each one:
+- title: a short imperative action (max 12 words).
+- problem: the customer problem being addressed, grounded in the evidence above.
+- intervention: the concrete product change you propose.
+- measurable_outcome: one metric the team can track, with a target if you can justify one.
+
+Rules:
+- Do not invent quotes. Do not include any quotation in your answer.
+- Do not claim that a trend increased or decreased, and do not compare to a previous period.
+- Describe each problem factually. Do not assert that one issue caused another, or that a
+  fee caused a balance error, unless the evidence explicitly says so.
+- Do not invent numbers that are not in the evidence above.
+- Keep each field to one short sentence of at most 18 words.
+- Do not use bullet lists, markdown headings or long explanations in the fields.
 
 Return JSON:
-{{"body_markdown": "...", "leading_themes": ["..."], "key_issue": "...",
- "recommendations": [{{"title": "...", "problem": "...", "intervention": "...", "measurable_outcome": "..."}}]}}"""
+{{"recommendations": [{{"title": "...", "problem": "...", "intervention": "...", "measurable_outcome": "..."}}]}}"""
+
+#: Words that would assert a trend the dataset cannot support.
+TREND_CLAIM_WORDS = (
+    "increase", "increased", "increasing", "decrease", "decreased", "decreasing",
+    "rising", "rising sharply", "falling", "compared to last", "compared to the previous",
+    "year on year", "yoy", "more than last week", "week over week", "since last month",
+    "trend is", "trending up", "trending down",
+)
+
+#: A model must not turn a co-occurrence in reviews into a causal claim.
+CAUSAL_CLAIM_WORDS = (
+    "causing", "caused by", "leading to", "resulting in", "due to",
+    "because of this", "as a result", "which led to", "consequently",
+)
 
 EXPLANATION_SYSTEM = (
     "You write clear, neutral customer-facing explanations for Groww, an Indian "
@@ -126,6 +145,62 @@ def _quote_block(quotations: list[ThemeEvidence]) -> str:
     return "\n".join(lines)
 
 
+def _assemble_pulse(
+    *,
+    window_start: date,
+    window_end: date,
+    review_count: int,
+    leading: list,
+    quotations: list[ThemeEvidence],
+    issue_text: str,
+    recs: list[Recommendation],
+    max_words: int,
+) -> str:
+    """Build the pulse markdown from measured facts and validated recommendations.
+
+    The theme order, the theme counts, the quotations and their attribution are
+    always produced here in code — a model never decides which quote belongs to
+    which theme.
+    """
+    lines: list[str] = []
+    lines.append(
+        f"**Window** {window_start.isoformat()} → {window_end.isoformat()} · "
+        f"{review_count} reviews analysed; theme counts below are measured from the CSV."
+    )
+    lines.append("")
+    lines.append("**Leading themes**")
+    for index, theme in enumerate(leading, start=1):
+        lines.append(f"{index}. {theme.name} — {theme.measured_count} reviews.")
+    lines.append("")
+    lines.append("**What customers said (verbatim)**")
+    for quote in quotations[:2]:
+        excerpt = quote.excerpt
+        if len(excerpt) > 105:
+            excerpt = excerpt[:105].rsplit(" ", 1)[0] + "…"
+        lines.append(f'> "{excerpt}" — review {quote.review_id}, {quote.date.isoformat()}.')
+    lines.append("")
+    lines.append(f"**Most important observed issue** {issue_text}.")
+    lines.append("")
+    lines.append("**Recommendations**")
+    for index, rec in enumerate(recs, start=1):
+        lines.append(
+            f"{index}. **{rec.title}** — Problem: {rec.problem} Fix: {rec.intervention} "
+            f"Measure: {rec.measurable_outcome}"
+        )
+    body = "\n".join(lines)
+    if count_words(body) > max_words:
+        body = _trim_to_word_budget(
+            body,
+            max_words,
+            [t.name for t in leading],
+            [t.measured_count for t in leading],
+            quotations,
+            issue_text,
+            recs,
+        )
+    return body
+
+
 def _deterministic_pulse(
     reviews: list[Review],
     analysis: AnalysisResult,
@@ -143,8 +218,8 @@ def _deterministic_pulse(
         key=lambda t: rankings[t.theme_id].rank if t.theme_id in rankings else 99,
     )
     leading = ordered[:3]
-
     quotations = analysis.quotations[: settings.max_quotations]
+
     issue = fee_result.selected
     if issue:
         issue_text = (
@@ -157,8 +232,44 @@ def _deterministic_pulse(
     else:
         issue_text = "no fee issue could be isolated from the review set"
 
+    recs = _default_recommendations(reviews, leading, issue)
+    body = _assemble_pulse(
+        window_start=window_start,
+        window_end=window_end,
+        review_count=len(reviews),
+        leading=leading,
+        quotations=quotations,
+        issue_text=issue_text,
+        recs=recs,
+        max_words=max_words,
+    )
+
+    warnings: list[str] = []
+    if count_words(body) > max_words:  # pragma: no cover - defensive
+        warnings.append(f"The pulse is {count_words(body)} words after trimming.")
+
+    return WeeklyPulse(
+        title=f"Weekly Product Pulse — Groww ({window_start.isoformat()} → {window_end.isoformat()})",
+        body_markdown=body,
+        word_count=count_words(body),
+        leading_themes=[t.name for t in leading],
+        quotations=quotations,
+        key_issue=issue_text,
+        recommendations=recs,
+        mode=AnalysisMode.HEURISTIC,
+        warnings=warnings,
+    )
+
+
+def _default_recommendations(
+    reviews: list[Review],
+    leading: list,
+    issue,
+) -> list[Recommendation]:
+    """Evidence-based default recommendations (used when the LLM is unusable)."""
+    settings = get_settings()
     recs: list[Recommendation] = []
-    if issue:
+    if issue is not None:
         recs.append(
             Recommendation(
                 title="Show a per-order charge breakdown",
@@ -179,9 +290,7 @@ def _deterministic_pulse(
                     "Reviews call brokerage an unexpected flat charge; the documented rule is a "
                     "₹5 minimum."
                 ),
-                intervention=(
-                    "Show the 'whichever is lower, minimum ₹5' rule on the order ticket."
-                ),
+                intervention="Show the 'whichever is lower, minimum ₹5' rule on the order ticket.",
                 measurable_outcome="Tickets tagged 'brokerage' per 1,000 orders.",
             )
         )
@@ -194,7 +303,6 @@ def _deterministic_pulse(
                 measurable_outcome="Charge-related tickets per 1,000 orders, tracked weekly.",
             )
         )
-
     if leading:
         recs.append(
             Recommendation(
@@ -207,66 +315,7 @@ def _deterministic_pulse(
                 measurable_outcome="Repeat rate of this theme in the next four weekly reviews.",
             )
         )
-    recs = recs[: settings.recommendations_count]
-    while len(recs) < settings.recommendations_count:
-        recs.append(
-            Recommendation(
-                title="Review the remaining themes with the owning squads",
-                problem="The review set did not give enough signal for a targeted action.",
-                intervention="Discuss the remaining themes in the weekly product review.",
-                measurable_outcome="A decision recorded for each remaining theme.",
-            )
-        )
-
-    top_theme_names = [t.name for t in leading]
-    theme_counts = [t.measured_count for t in leading]
-    lines: list[str] = []
-    lines.append(
-        f"**Window** {window_start.isoformat()} → {window_end.isoformat()} · "
-        f"{len(reviews)} reviews analysed; theme counts below are measured from the CSV."
-    )
-    lines.append("")
-    lines.append("**Leading themes**")
-    for index, (name, count) in enumerate(zip(top_theme_names, theme_counts), start=1):
-        lines.append(f"{index}. {name} — {count} reviews.")
-    lines.append("")
-    lines.append("**What customers said (verbatim)**")
-    for quote in quotations[:2]:
-        excerpt = quote.excerpt
-        if len(excerpt) > 105:
-            excerpt = excerpt[:105].rsplit(" ", 1)[0] + "…"
-        lines.append(f'> "{excerpt}" — review {quote.review_id}, {quote.date.isoformat()}.')
-    lines.append("")
-    lines.append(f"**Most important observed issue** {issue_text}.")
-    lines.append("")
-    lines.append("**Recommendations**")
-    for index, rec in enumerate(recs, start=1):
-        lines.append(
-            f"{index}. **{rec.title}** — Problem: {rec.problem} Fix: {rec.intervention} "
-            f"Measure: {rec.measurable_outcome}"
-        )
-    body = "\n".join(lines)
-
-    warnings: list[str] = []
-    if count_words(body) > max_words:
-        warnings.append(
-            f"Draft was {count_words(body)} words; trimmed to fit the {max_words}-word limit."
-        )
-        body = _trim_to_word_budget(
-            body, max_words, top_theme_names, theme_counts, quotations, issue_text, recs
-        )
-
-    return WeeklyPulse(
-        title=f"Weekly Product Pulse — Groww ({window_start.isoformat()} → {window_end.isoformat()})",
-        body_markdown=body,
-        word_count=count_words(body),
-        leading_themes=top_theme_names,
-        quotations=quotations,
-        key_issue=issue_text,
-        recommendations=recs,
-        mode=AnalysisMode.HEURISTIC,
-        warnings=warnings,
-    )
+    return recs[: settings.recommendations_count]
 
 
 def _trim_to_word_budget(
@@ -341,7 +390,13 @@ def generate_weekly_pulse(
     window_end: date,
     client: Optional[LLMClient] = None,
 ) -> WeeklyPulse:
-    """Generate the internal weekly product pulse."""
+    """Generate the internal weekly product pulse.
+
+    The *facts* (theme order, theme counts, the quotations and their
+    attribution, the observed issue) are always assembled in code.  The model
+    is used for the judgement part — the three recommendations — and its
+    output is validated before it is used.
+    """
     settings = get_settings()
     client = client or LLMClient()
 
@@ -353,12 +408,19 @@ def generate_weekly_pulse(
         window_end=window_end,
         max_words=settings.pulse_max_words,
     )
-
     if not client.available:
         fallback.warnings.append(
             "Generated by the deterministic composer (no LLM credentials configured)."
         )
         return fallback
+
+    rankings = {r.theme_id: r for r in analysis.rankings}
+    ordered = sorted(
+        analysis.themes,
+        key=lambda t: rankings[t.theme_id].rank if t.theme_id in rankings else 99,
+    )
+    leading = ordered[:3]
+    issue = fee_result.selected
 
     try:
         payload, _ = client.complete_json(
@@ -370,107 +432,84 @@ def generate_weekly_pulse(
                 themes=_theme_block(analysis),
                 quotes=_quote_block(analysis.quotations[: settings.max_quotations]),
                 issue=(
-                    fee_result.selected.label
-                    if fee_result.selected
+                    f"{issue.label} — {len(issue.supporting_review_ids)} reviews"
+                    if issue
                     else fee_result.limitation_note or "none identified"
                 ),
-                max_words=settings.pulse_max_words,
                 recs=settings.recommendations_count,
             ),
         )
     except LLMError as exc:
-        fallback.warnings.append(f"LLM pulse generation failed ({exc}); used the deterministic composer.")
+        fallback.warnings.append(
+            f"LLM recommendation generation failed ({exc}); used the deterministic recommendations."
+        )
         return fallback
 
-    body = str(payload.get("body_markdown", "")).strip()
-    warnings: list[str] = []
-    if not body:
-        fallback.warnings.append("LLM returned an empty pulse; used the deterministic composer.")
-        return fallback
-
-    word_count = count_words(body)
-    if word_count > settings.pulse_max_words:
-        try:
-            payload, _ = client.complete_json(
-                PULSE_SYSTEM,
-                PULSE_USER.format(
-                    start=window_start.isoformat(),
-                    end=window_end.isoformat(),
-                    n=len(reviews),
-                    themes=_theme_block(analysis),
-                    quotes=_quote_block(analysis.quotations[: settings.max_quotations]),
-                    issue=(
-                        fee_result.selected.label
-                        if fee_result.selected
-                        else fee_result.limitation_note or "none identified"
-                    ),
-                    max_words=settings.pulse_max_words,
-                    recs=settings.recommendations_count,
-                )
-                + f"\nIMPORTANT: your previous answer was {word_count} words. Rewrite it under "
-                f"{settings.pulse_max_words} words.",
-            )
-            body = str(payload.get("body_markdown", "")).strip()
-            word_count = count_words(body)
-        except LLMError:
-            pass
-        if count_words(body) > settings.pulse_max_words:
-            fallback.warnings.append(
-                f"LLM pulse was {count_words(body)} words (limit {settings.pulse_max_words}); "
-                "used the deterministic composer instead."
-            )
-            return fallback
-
-    # Quotation provenance: every quotation in the body must be verbatim.
-    stray = _find_non_verbatim_quotes(body, reviews)
-    if stray:
-        replacement = analysis.quotations[0].excerpt if analysis.quotations else ""
-        if replacement:
-            body = body.replace(stray[0], replacement, 1)
-            warnings.append(
-                "Replaced a non-verbatim quotation with a verified customer quotation "
-                f"(review {analysis.quotations[0].review_id})."
-            )
-        else:
-            fallback.warnings.append(
-                "LLM pulse contained a quotation that is not in the review set; "
-                "used the deterministic composer instead."
-            )
-            return fallback
-
-    raw_recs = payload.get("recommendations") or []
     recs: list[Recommendation] = []
-    for item in raw_recs[: settings.recommendations_count]:
+    rejected: list[str] = []
+    for item in (payload.get("recommendations") or []):
         if not isinstance(item, dict):
             continue
         try:
-            recs.append(
-                Recommendation(
-                    title=str(item.get("title", "")).strip()[:120],
-                    problem=str(item.get("problem", "")).strip(),
-                    intervention=str(item.get("intervention", "")).strip(),
-                    measurable_outcome=str(item.get("measurable_outcome", "")).strip(),
-                )
+            candidate = Recommendation(
+                title=str(item.get("title", "")).strip()[:120],
+                problem=str(item.get("problem", "")).strip(),
+                intervention=str(item.get("intervention", "")).strip(),
+                measurable_outcome=str(item.get("measurable_outcome", "")).strip(),
             )
         except Exception:
             continue
+        if not (candidate.title and candidate.problem and candidate.intervention and candidate.measurable_outcome):
+            continue
+        text = " ".join(
+            [candidate.title, candidate.problem, candidate.intervention, candidate.measurable_outcome]
+        ).lower()
+        claims = [word for word in TREND_CLAIM_WORDS if word in text]
+        causal = [word for word in CAUSAL_CLAIM_WORDS if word in text]
+        if claims:
+            rejected.append(f"{candidate.title[:50]} (unsupported trend claim: {claims[0]})")
+            continue
+        if causal:
+            rejected.append(f"{candidate.title[:50]} (unsupported causal wording: {causal[0]})")
+            continue
+        recs.append(candidate)
+
+    warnings: list[str] = list(fallback.warnings)
     if len(recs) != settings.recommendations_count:
-        warnings.append(
-            f"Model returned {len(recs)} recommendations; the deterministic composer was used "
-            "for the missing ones."
+        fallback.warnings.append(
+            f"The model returned {len(recs)} usable recommendations; the deterministic ones "
+            "were used for the rest."
         )
-        for extra in fallback.recommendations[len(recs) : settings.recommendations_count]:
+        defaults = _default_recommendations(reviews, leading, issue)
+        for extra in defaults:
+            if len(recs) >= settings.recommendations_count:
+                break
             recs.append(extra)
+        recs = recs[: settings.recommendations_count]
+    if rejected:
+        warnings.append(
+            "Rejected recommendation(s) that asserted an unsupported trend: "
+            + "; ".join(rejected[:3])
+        )
+
+    body = _assemble_pulse(
+        window_start=window_start,
+        window_end=window_end,
+        review_count=len(reviews),
+        leading=leading,
+        quotations=analysis.quotations[: settings.max_quotations],
+        issue_text=fallback.key_issue,
+        recs=recs,
+        max_words=settings.pulse_max_words,
+    )
 
     return WeeklyPulse(
         title=fallback.title,
         body_markdown=body,
         word_count=count_words(body),
-        leading_themes=[
-            str(t) for t in (payload.get("leading_themes") or fallback.leading_themes)
-        ][:3] or fallback.leading_themes,
+        leading_themes=fallback.leading_themes,
         quotations=analysis.quotations[: settings.max_quotations],
-        key_issue=str(payload.get("key_issue", "")).strip() or fallback.key_issue,
+        key_issue=fallback.key_issue,
         recommendations=recs,
         mode=AnalysisMode.LLM,
         warnings=warnings,

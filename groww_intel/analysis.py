@@ -23,6 +23,7 @@ Measured facts vs interpretation
 from __future__ import annotations
 
 import re
+import time
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 from statistics import mean, median
@@ -128,7 +129,7 @@ def review_digest_line(review: Review) -> str:
     return (
         f"[{review.review_id}] {review.date.isoformat()} | rating={rating} | "
         f"area={review.product_area.value} | title={review.title or '-'} | "
-        f"text={_excerpt(review.review_text, 420)}"
+        f"text={_excerpt(review.review_text, 260)}"
     )
 
 
@@ -393,7 +394,7 @@ def select_quotations(
 # LLM pipeline
 # --------------------------------------------------------------------------
 
-CHUNK_SIZE = 60
+CHUNK_SIZE = 90
 
 CHUNK_SYSTEM = (
     "You are a senior product analyst for an Indian investing platform (Groww). "
@@ -459,11 +460,12 @@ def _analyze_with_llm(
         lines = "\n".join(review_digest_line(r) for r in chunk)
         try:
             payload, _ = client.complete_json(
-                CHUNK_SYSTEM, CHUNK_USER.format(n=len(chunk), lines=lines)
+                CHUNK_SYSTEM, CHUNK_USER.format(n=len(chunk), lines=lines), retries=2
             )
         except LLMError as exc:
             notes.append(f"Batch {index}: {exc}")
             continue
+        time.sleep(1.0)  # stay under the provider's requests-per-minute limit
         chunk_ids = {r.review_id for r in chunk}
         for theme in payload.get("themes", []) or []:
             if not isinstance(theme, dict):
@@ -546,6 +548,15 @@ def _analyze_with_llm(
             f"Trimmed from {len(themes)} to {get_settings().max_themes} themes (hard limit)."
         )
         themes = themes[: get_settings().max_themes]
+
+    if len(themes) < 3:
+        # A consolidation that collapses everything into one or two themes
+        # fails the "three leading themes" requirement — do not publish it.
+        notes.append(
+            f"The LLM returned only {len(themes)} theme(s); using the documented keyword "
+            "taxonomy for a stable three-or-more-theme view."
+        )
+        return _analyze_heuristic(reviews, window_end, window_start, notes)
 
     covered = {rid for t in themes for rid in t.review_ids}
     unclassified = [r.review_id for r in reviews if r.review_id not in covered]
